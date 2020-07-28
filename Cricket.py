@@ -14,6 +14,7 @@ parser = argparse.ArgumentParser()
 group = parser.add_mutually_exclusive_group()
 
 parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', help='Enable verbose logging', default=False)
+parser.add_argument('interface', action='store', help='Sets the interface to use for sending and receiving')
 
 group.add_argument('-l', '--ignore-list', dest='list', action='store', type=list, help='Ignore APs inside this file')
 group.add_argument('-f', '--ignore-file', dest='file', action='store', type=str, help='Ignore APs given by command line input')
@@ -57,7 +58,7 @@ def Jammer():
 			sendp(DeAuth_Frame)
 
 def PacketHandler(packet):
-	verbose_output(1, f'Found packet')
+	print(packet.summary)
 	if packet.haslayer(Dot11):
 		if packet.addr2 not in ignore_AP:
 			if packet.type == 0:
@@ -74,7 +75,7 @@ def PacketHandler(packet):
 
 verbose_output(0, f'Starting loop')
 
-beaconSniffer = threading.Thread(target = sniff, kwargs = dict(prn=PacketHandler))
+beaconSniffer = threading.Thread(target = sniff, kwargs = dict(prn=PacketHandler, iface=args.interface))
 jammer = threading.Thread(target = Jammer)
 
 beaconSniffer.start()
