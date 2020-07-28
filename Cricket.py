@@ -58,7 +58,6 @@ def Jammer():
 			sendp(DeAuth_Frame)
 
 def PacketHandler(packet):
-	print(packet.summary)
 	if packet.haslayer(Dot11):
 		if packet.addr2 not in ignore_AP:
 			if packet.type == 0:
@@ -69,6 +68,7 @@ def PacketHandler(packet):
 						AP_list.append(packet.addr2)
 						verbose_output(1, f'Access Point Found: {packet.addr2}')
 				elif packet.subtype == 11:
+					verbose_output(1, f'Found Authentication Frame')
 					if output:
 						output.write(packet)
 						verbose_output(1, f'Authentication Frame Found for AP {packet.addr2}')
