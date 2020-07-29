@@ -14,7 +14,7 @@ global ignore_AP
 ignore_AP = []
 AP_list = []
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(description='A program that hops 2.4GHz channels to detect beacon frames and de-authorises all wirelessly connected hosts on the AP; Authentication frames may also be captured and saved to a .pcap file specified')
 ap_method = parser.add_mutually_exclusive_group()
 verbosity = parser.add_mutually_exclusive_group()
 
