@@ -20,6 +20,7 @@ parser.add_argument('interface', action='store', help='Sets the interface to use
 
 group.add_argument('-l', '--ignore-list', dest='list', action='store', type=list, help='Ignore APs given by command line input (each MAC or SSID separated by spaces)')
 group.add_argument('-f', '--ignore-file', dest='file', action='store', type=str, help='Ignore APs from this file (each MAC or SSID separated by newlines)')
+group.add_argument('-t', '--target-AP', dest='target', action='store', type=str, help='Specifically target a single choice AP (by MAC or SSID')
 
 parser.add_argument('-o', '--output', dest='output', action='store', type=str, help='File to write captured Auth Frames to (will only jam if not set)')
 parser.add_argument('-v', '--verbose', dest='verbose', action='store_true', help='Enable verbose logging', default=False)
@@ -45,9 +46,9 @@ else:
 	def verboseOutput(status, output, *details):
 		return None
 
-if args.list:
+if args.list != None:
 	ignore_AP += args.list
-elif args.file:
+elif args.file != None:
 	with open(args.file, 'r') as file:
 		ignore_AP += file.readlines()
 
@@ -55,7 +56,9 @@ if args.output:
 	output = PcapWriter(args.output, append=True)
 
 def changeChannel(iface, channel):
-	command = ['iwconfig', iface, 'channel', str(channel)]
+	global current_channel
+	current_channel = str(channel)
+	command = ['iwconfig', iface, 'channel', current_channel]
 	Popen(command, shell=False)
 
 def channelHop(iface, channels):
@@ -76,10 +79,14 @@ def packetHandler(packet):
 	if packet.haslayer(Dot11):
 		if packet.type == 0:
 			if packet.subtype == 8:
-				if packet.addr2 not in ignore_AP or packet[Dot11Elt].info not in ignore_AP:
+				if args.target != None:
+					if packet.addr2 == args.target or bytes.decode(packet[Dot11Elt].info) == args.target:
+						AP_list.append(packet.addr2)
+						verboseOutput(1, f'Target found: MAC = {packet.addr2} SSID = {packet[Dot11Elt].info} CH = {current_channel}')
+				elif packet.addr2 not in ignore_AP or bytes.decode(packet[Dot11Elt].info) not in ignore_AP:
 					if packet.addr2 not in AP_list:
 						AP_list.append(packet.addr2)
-						verboseOutput(1, f'Access Point Found: {packet.addr2}')
+						verboseOutput(1, f'Access Point Found: MAC = {packet.addr2} SSID = {packet[Dot11Elt].info} CH = {current_channel}')
 			elif packet.subtype == 11:
 				if output:
 					output.write(packet)
