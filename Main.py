@@ -1,7 +1,9 @@
 #!/bin/python3
 
 def main():
-	# Set up arguments
+	# Set up logging and arguments
+	import logging
+	import sys
 	import argparse
 
 	parser = argparse.ArgumentParser(description='A program that hops 2.4GHz channels to detect beacon frames and de-authorises all wirelessly connected hosts on the AP; Authentication frames may also be captured and saved to a .pcap file specified')
@@ -26,15 +28,10 @@ def main():
 	parser.add_argument('-c', '--channel', dest='channels', action='store', type=list, help='Channels to hop on (default is 1-11)', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
 
 	args = parser.parse_args()
-
-	# Set up logging
-    import logging
-    import sys
-
-    logging.basicConfig(stream=sys.stdout, format='\t%(message)s',level=args.verbosity)
-
-    # Import Cricket instance
-    import Cricket.Cricket
+	logging.basicConfig(stream=sys.stdout, format='\t%(message)s',level=args.verbosity)
+	
+	# Import Cricket instance
+	import Cricket.Cricket
 
 	# Set list of APs to ignore
 	ignoredAPs = []
@@ -70,11 +67,10 @@ def main():
 	cricket = Cricket(ignoredAPs, attackMode, int1, int2, args.output, args.channels, targets=targets)
 
 	running = True
-	while running:
-		cricket.main()
-		# catch interrupt
-		# display stats of:
-		#	aps found (sorted by channel) and if they were captured
+	try:
+		while running:
+			cricket.main()
+
 	except KeyboardInterrupt:
 		statistics = {}
 		wapsDiscovered = 0
@@ -97,7 +93,7 @@ def main():
 					log_str = '<Handshake Not Found>\t'
 				log_str += 'ESSID: ' + AccessPoint.essid + ' CH: ' + str(AccessPoint.essid)
 				logging.info(log_str)
-		logging.info('\tWireless Access Points Discovered:\t' + str(wapsDiscovered)
+		logging.info('\tWireless Access Points Discovered:\t' + str(wapsDiscovered))
 		logging.info('\tWPA2 Handshakes Captured:\t\t\t' + str(handshakesFound))
 		quit()
 
