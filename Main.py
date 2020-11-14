@@ -12,7 +12,7 @@ def main():
 	attacks = parser.add_mutually_exclusive_group()
 
 	parser.add_argument('int1', action='store', help='Sets the interface to use for sending and/or receiving')
-	parser.add_argument('int2', action='store', help='Sets a secondary interface to use; int1 sends, int2 receives')
+	parser.add_argument('int2', nargs='?', action='store', help='Sets a secondary interface to use; int1 sends, int2 receives', default=None)
 
 	ignoring.add_argument('-l', '--ignore-list', dest='list', action='store', type=list, help='Ignore APs given by command line input (by ESSID or BSSID, separated by spaces)')
 	ignoring.add_argument('-f', '--ignore-file', dest='file', action='store', type=str, help='Ignore APs from this file (by ESSID or BSSID, separated by newlines)')
@@ -31,7 +31,7 @@ def main():
 	logging.basicConfig(stream=sys.stdout, format='\t%(message)s',level=args.verbosity)
 	
 	# Import Cricket instance
-	import Cricket.Cricket
+	from Cricket import Cricket
 
 	# Set list of APs to ignore
 	ignoredAPs = []
@@ -46,6 +46,7 @@ def main():
 
 	# Set attack mode
 	attackMode = ''
+	targets = []
 
 	if args.target:
 		attackMode = 'target'
@@ -66,12 +67,11 @@ def main():
 	# Create Cricket instance and run
 	cricket = Cricket(ignoredAPs, attackMode, int1, int2, args.output, args.channels, targets=targets)
 
-	running = True
-	try:
-		while running:
-			cricket.main()
+	# Need to figure out a way to have multiple threads
 
+	# Except Ctrl + C to close everything
 	except KeyboardInterrupt:
+
 		statistics = {}
 		wapsDiscovered = 0
 		handshakesFound = 0
@@ -94,7 +94,7 @@ def main():
 				log_str += 'ESSID: ' + AccessPoint.essid + ' CH: ' + str(AccessPoint.essid)
 				logging.info(log_str)
 		logging.info('\tWireless Access Points Discovered:\t' + str(wapsDiscovered))
-		logging.info('\tWPA2 Handshakes Captured:\t\t\t' + str(handshakesFound))
+		logging.info('\tWPA2 Handshakes Captured:\t\t' + str(handshakesFound))
 		quit()
 
 if __name__ == '__main__':
