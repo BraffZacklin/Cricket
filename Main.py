@@ -26,6 +26,7 @@ def main():
 
 	parser.add_argument('-o', '--output', dest='output', action='store', type=str, help='File to write captured Auth Frames to (will only jam if not set)')
 	parser.add_argument('-c', '--channel', dest='channels', action='store', type=list, help='Channels to hop on (default is 1-11)', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+	parser.add_argument('-w', '--wait-on-channel', dest='sleepOnChannel', action='store', type=int, help='Time to stay on each channel for when hopping', default=5)
 
 	args = parser.parse_args()
 	logging.basicConfig(stream=sys.stdout, format='\t%(message)s',level=args.verbosity)
@@ -65,37 +66,43 @@ def main():
 		int2 = args.int2
 
 	# Create Cricket instance and run
-	cricket = Cricket(ignoredAPs, attackMode, int1, int2, args.output, args.channels, targets=targets)
+	cricket = Cricket(ignoredAPs, attackMode, int1, int2, args.output, args.channels, targets, args.sleepOnChannel)
 
-	# Need to figure out a way to have multiple threads
+# Problems:
+# 	1. Need to find a way to make it exit gracefully (kill all threads)	
 
-	# Except Ctrl + C to close everything
+	try:
+		cricket.setRecvIntMonitor()
+		cricket.launch()
+		while True:
+			None
 	except KeyboardInterrupt:
-
+		cricket.halt()
+		cricket.setRecvIntStation()
 		statistics = {}
 		wapsDiscovered = 0
 		handshakesFound = 0
 		for AccessPoint in cricket.discoveredAPs:
 			wapsDiscovered += 1
-
 			# if a dict entry exists, append to it's corresponding list, else create it
 			if statistics[AccessPoint.channel]:
 				statistics[AccessPoint.channel].append(AccessPoint)
 			else:
 				statistics[AccessPoint.channel] = [AccessPoint]
-
-		for channels in statistics:
-			for AccessPoint in statistics[channel]:
-				if AccessPoint.bssid in cricket.handshakesFound:
-					handshakesFound += 1
-					log_str = '<Handshake Found>\t\t'		
-				else:
-					log_str = '<Handshake Not Found>\t'
-				log_str += 'ESSID: ' + AccessPoint.essid + ' CH: ' + str(AccessPoint.essid)
-				logging.info(log_str)
+			for channels in statistics:
+				for AccessPoint in statistics[channel]:
+					if AccessPoint.bssid in cricket.handshakesFound:
+						handshakesFound += 1
+						log_str = '<Handshake Found>\t\t'		
+					else:
+						log_str = '<Handshake Not Found>\t'
+					log_str += 'ESSID: ' + AccessPoint.essid + ' CH: ' + str(AccessPoint.essid)
+					logging.info(log_str)
 		logging.info('\tWireless Access Points Discovered:\t' + str(wapsDiscovered))
 		logging.info('\tWPA2 Handshakes Captured:\t\t' + str(handshakesFound))
 		quit()
+
+	cricket.launch()
 
 if __name__ == '__main__':
     main()
