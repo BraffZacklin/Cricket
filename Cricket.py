@@ -17,12 +17,13 @@ def parseArguments():
 	verbosity = parser.add_mutually_exclusive_group()
 	attacks = parser.add_mutually_exclusive_group()
 
-	parser.add_argument('int1', action='store', help='Sets the interface to use for sending and/or receiving')
-	parser.add_argument('int2', nargs='?', action='store', help='Sets a secondary interface to use; int1 sends, int2 receives', default=None)
+	parser.add_argument('int', action='store', help='Sets the interface to use for sending and/or receiving')
+	parser.add_argument('recvInt', nargs='?', action='store', help='Sets a secondary interface to use; int1 sends, int2 receives', default=None)
 
 	ignoring.add_argument('-l', '--ignore-list', dest='list', action='store', type=list, help='Ignore APs given by command line input (by ESSID or BSSID, separated by spaces)')
 	ignoring.add_argument('-f', '--ignore-file', dest='file', action='store', type=str, help='Ignore APs from this file (by ESSID or BSSID, separated by newlines)')
 
+	attacks.add_argument('-j', '--jammer', dest='jammer', action='store_const', const='jammer', help='Jam every AP detected indefinitely and capture handshakes')
 	attacks.add_argument('-t', '--target', dest='target', action='store', type=list, help='Target one or more APs (by ESSID or BSSID)')
 	attacks.add_argument('-s', '--spray', dest='spray', action='store_const', const='spray', help='Target every discovered AP until a handshake is captured')
 	attacks.add_argument('-u', '--unarmed', dest='unarmed', action='store_const', const='unarmed', help='Do not send any de-auth frames')
@@ -59,6 +60,8 @@ def makeJammerInstance(args):
 		attackMode = 'spray'
 	elif args.unarmed:
 		attackMode = 'unarmed'
+	elif args.jammer:
+		attackMode = 'jammer'
 
 	# Set appropriate sending and receiving interfaces
 	int1 = args.int1
@@ -131,9 +134,9 @@ def main():
 			None
 	except KeyboardInterrupt:
 		jammer.halt()
-		jammer.setRecvIntStation()
 		for t in threads:
 			t.join()
+		jammer.setRecvIntStation()
 		statDump(jammer)
 
 if __name__ == '__main__':

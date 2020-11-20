@@ -72,33 +72,33 @@ class Jammer():
 	def readPacket(self, packet):
 		# If the packet is a frame...
 		if packet.haslayer(Dot11):
-				# If the packet is a management frame
-				if packet.type == 0:
-					essid = bytes.decode(packet[Dot11Elt].info)
-					bssid = packet.addr2
-					# If the packet is a beacon frame
-					if packet.subtype == 8:
-						# If it isn't to be ignored
-						if essid not in self.ignoreBeacons or bssid not in self.ignoreBeacons:
-							# add bssid to discoveredAPs
-							# create new AccessPoint class and append to targets
-							# ensure we don't sniff further beacons by adding to ignoreBeacons
-							channel = self.freqToChannel(packet[RadioTap].Channel)
-							self.discoveredAPs.append(AccessPoint(essid, bssid, channel))
-							self.ignoreBeacons.append(bssid)
-							logging.info('New AP found: ESSID = ' + essid + ', BSSID = ' +  bssid + ', CH = ' + str(channel))
-					# Elif the packet is an authentication frame
-					elif packet.subtype == 11:
-						# if a handshake hasn't been captured
-						if bssid not in list(self.handshakesFound.keys()):
-							# Note it's been captured and write to output file if one exists
-							self.handshakesFound[bssid] = packet
-							logging.info('New Authentication Frame Found: ESSID = ' + essid)
-				
+			# If the packet is a management frame
+			if packet.type == 0:
+				essid = bytes.decode(packet[Dot11Elt].info)
+				bssid = packet.addr2
+				# If the packet is a beacon frame
+				if packet.subtype == 8:
+					# If it isn't to be ignored
+					if essid not in self.ignoreBeacons or bssid not in self.ignoreBeacons:
+						# add bssid to discoveredAPs
+						# create new AccessPoint class and append to targets
+						# ensure we don't sniff further beacons by adding to ignoreBeacons
+						channel = self.freqToChannel(packet[RadioTap].Channel)
+						self.discoveredAPs.append(AccessPoint(essid, bssid, channel))
+						self.ignoreBeacons.append(bssid)
+						logging.info('New AP found: ESSID = ' + essid + ', BSSID = ' +  bssid + ', CH = ' + str(channel))
+				# Elif the packet is an authentication frame
+				elif packet.subtype == 11:
+					# if a handshake hasn't been captured
+					if bssid not in list(self.handshakesFound.keys()):
+						# Note it's been captured and write to output file if one exists
+						self.handshakesFound[bssid] = packet
+						logging.info('New Authentication Frame Found: ESSID = ' + essid)
+			
 				else:
 					logging.debug('Found non-auth, non-beacon management frame')
-		else:
-			logging.debug('Found non-management frame transmission')
+			else:
+				logging.debug('Found non-management frame transmission')
 
 	def killSniffing(self, packet):
 		if self.running == True:
@@ -131,6 +131,12 @@ class Jammer():
 					self.changeChannel(AccessPoint.channel, self.sendInt)
 					AccessPoint.jam(self.sendInt)
 
+	def jammingAttack(self):
+		while self.running == True:
+			for AccessPoint in self.discoveredAPs:
+				self.changeChannel(AccessPoint.channel, self.sendInt)
+				AccessPoint.jam(self.sendInt)
+
 	def launchAttack(self):
 		# All three attacks condensed into one single switch
 		if self.attackMode == 'spray':
@@ -139,7 +145,8 @@ class Jammer():
 			self.unarmedAttack()
 		elif self.attackMode == 'target':
 			self.targetAttack()
-		else:
+		elif self.attackMode == 'jammer':
+			self.jammingAttack()
 			logging.debug('No attack mode set')
 			return None
 
