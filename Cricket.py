@@ -64,12 +64,12 @@ def makeJammerInstance(args):
 		attackMode = 'jammer'
 
 	# Set appropriate sending and receiving interfaces
-	int1 = args.int1
+	int1 = args.int
 
-	if not args.int2:
-		int2 = args.int1
+	if not args.recvInt:
+		int2 = args.int
 	else:
-		int2 = args.int2
+		int2 = args.recvInt
 
 	# Create Jammer instance to share
 	return WiFiJammer.Jammer(ignoredAPs, attackMode, int1, int2, args.output, args.channels, targets, args.sleepOnChannel)
@@ -81,19 +81,19 @@ def statDump(jammer):
 	for AccessPoint in jammer.discoveredAPs:
 		wapsDiscovered += 1
 		# if a dict entry exists, append to it's corresponding list, else create it
-		if statistics[AccessPoint.channel]:
+		if AccessPoint.channel in statistics:
 			statistics[AccessPoint.channel].append(AccessPoint)
 		else:
 			statistics[AccessPoint.channel] = [AccessPoint]
-		for channels in statistics:
-			for AccessPoint in statistics[channel]:
-				if AccessPoint.bssid in jammer.handshakesFound:
-					handshakesFound += 1
-					log_str = '<Handshake Found>\t\t'		
-				else:
-					log_str = '<Handshake Not Found>\t'
-				log_str += 'ESSID: ' + AccessPoint.essid + ' CH: ' + str(AccessPoint.essid)
-				print(log_str)
+	for channel in statistics:
+		for AccessPoint in statistics[channel]:
+			if AccessPoint.bssid in jammer.handshakesFound:
+				handshakesFound += 1
+				log_str = '<Handshake Found>\t\t'		
+			else:
+				log_str = '<Handshake Not Found>\t'
+			log_str += 'ESSID: ' + AccessPoint.essid + '\t\tCH: ' + str(AccessPoint.channel)
+			print(log_str)
 	print('\tWireless Access Points Discovered:\t' + str(wapsDiscovered))
 	print('\tWPA2 Handshakes Captured:\t\t' + str(handshakesFound))
 
@@ -119,7 +119,6 @@ def main():
 	args = parseArguments()
 	logging.basicConfig(stream=sys.stdout, format='\t%(message)s',level=args.verbosity)
 	jammer = makeJammerInstance(args)
-	jammer.setRecvIntMonitor()
 
 	threads = [
 		CricketThreads(jammerInstance=jammer, name='attackThread'),
@@ -136,7 +135,6 @@ def main():
 		jammer.halt()
 		for t in threads:
 			t.join()
-		jammer.setRecvIntStation()
 		statDump(jammer)
 
 if __name__ == '__main__':

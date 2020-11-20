@@ -8,7 +8,7 @@ from time import sleep, monotonic
 #import threading
 import multiprocessing
 
-from subprocess import Popen
+from subprocess import call
 
 import logging
 logger = logging.getLogger(__name__)
@@ -31,18 +31,6 @@ class Jammer():
 		self.channelIndex = 0
 		self.running = True
 
-	def setRecvIntMonitor(self):
-		Popen(['ip', 'link', 'set', self.recvInt, 'down'], shell=False)
-		Popen(['iw', 'dev', self.recvInt, 'set', 'type', 'monitor'], shell=False)
-		Popen(['ip', 'link', 'set', self.recvInt, 'up'], shell=False)
-		logging.debug('Set ' + self.recvInt + ' to Monitor Mode')
-
-	def setRecvIntStation(self):
-		Popen(['ip', 'link', 'set', self.recvInt, 'down'], shell=False)
-		Popen(['iw', 'dev', self.recvInt, 'set', 'type', 'station'], shell=False)
-		Popen(['ip', 'link', 'set', self.recvInt, 'up'], shell=False)
-		logging.debug('Set ' + self.recvInt + ' to Station Mode')
-
 	def freqToChannel(self, freq):
 		base = 2407			# 2.4Ghz
 		if freq // 1000 == 5: 
@@ -51,7 +39,7 @@ class Jammer():
 		return (freq - base)//5
 
 	def changeChannel(self, newChannel, interface):
-		Popen(['iwconfig', interface, 'channel', str(newChannel)], shell=False)
+		call(['iwconfig', interface, 'channel', str(newChannel)], shell=False)
 
 		logging.debug('Set channel to ' + str(newChannel) + ' on ' + interface)
 
@@ -79,14 +67,16 @@ class Jammer():
 				# If the packet is a beacon frame
 				if packet.subtype == 8:
 					# If it isn't to be ignored
-					if essid not in self.ignoreBeacons or bssid not in self.ignoreBeacons:
-						# add bssid to discoveredAPs
-						# create new AccessPoint class and append to targets
-						# ensure we don't sniff further beacons by adding to ignoreBeacons
-						channel = self.freqToChannel(packet[RadioTap].Channel)
-						self.discoveredAPs.append(AccessPoint(essid, bssid, channel))
-						self.ignoreBeacons.append(bssid)
-						logging.info('New AP found: ESSID = ' + essid + ', BSSID = ' +  bssid + ', CH = ' + str(channel))
+					if essid not in self.ignoreBeacons:
+						if bssid not in self.ignoreBeacons:
+							# add bssid to discoveredAPs
+							# create new AccessPoint class and append to targets
+							# ensure we don't sniff further beacons by adding to ignoreBeacons
+							channel = self.freqToChannel(packet[RadioTap].Channel)
+							self.discoveredAPs.append(AccessPoint(essid, bssid, channel))
+							self.ignoreBeacons.append(bssid)
+							print(self.ignoreBeacons)
+							logging.info('New AP found: ESSID = ' + essid + ', BSSID = ' +  bssid + ', CH = ' + str(channel))
 				# Elif the packet is an authentication frame
 				elif packet.subtype == 11:
 					# if a handshake hasn't been captured
@@ -107,7 +97,6 @@ class Jammer():
 			return True
 
 	def sniffPackets(self):
-		# For some reason, this doesn't work I think?
 		sniff(count=0, prn=self.readPacket, stop_filter=self.killSniffing, iface=self.recvInt)
 
 	def sprayAttack(self):
