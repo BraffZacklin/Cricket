@@ -80,7 +80,7 @@ class Jammer():
 			while monotonic() < currentTime + self.sleepOnChannel and self.running == True:
 				# We're expecting the recv channel to want to be updated much more
 				recvChannel = self.channelRequest[self.recvInt]
-				if recvChannel != 0 and recvChannel != self.channelCurrent[self.recvInt]
+				if recvChannel != 0 and recvChannel != self.channelCurrent[self.recvInt]:
 					self.changeChannel(recvChannel, self.recvInt)
 				if self.singleAdapterMode == True:
 					sleep(0.25)
